@@ -12,9 +12,11 @@ def main():
 
   program.add_argument('log')
 
-  group = program.add_mutually_exclusive_group()
-  group.add_argument('-f', help='Group results by filename', action='store_true')
-  group.add_argument('-w', help='Group results by warning type', action='store_true')
+  grouping = program.add_mutually_exclusive_group(required=True)
+  grouping.add_argument('-f', help='Group results by filename', action='store_true')
+  grouping.add_argument('-w', help='Group results by warning type', action='store_true')
+
+  program.add_argument('-r', help='Reverse output order', action='store_true')
 
   program.add_argument('-j', '--json', help='Output data in JSON format', action='store_true')
 
@@ -57,9 +59,9 @@ def main():
             output[warning][file] = 0
           output[warning][file] += count
 
-    for group in sorted(output.keys(), key=lambda g: sum(output[g].values()), reverse=True):
+    for group in sorted(output.keys(), key=lambda g: sum(output[g].values()), reverse=not arguments.r):
       print(f'{group}: {sum(output[group].values())}')
-      for item in sorted(output[group].keys(), key=lambda i: output[group][i], reverse=True):
+      for item in sorted(output[group].keys(), key=lambda i: output[group][i], reverse=not arguments.r):
         total_count += output[group][item]
         print(f'\t{item}: {output[group][item]}')
     print(f'{total_count} warnings of {total_warnings} types across {total_files} files')

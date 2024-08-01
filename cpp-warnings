@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import re
 
 
@@ -20,11 +21,12 @@ def main():
   arguments = program.parse_args()
 
   with open(arguments.log, 'r', errors='replace') as file:
-    files = {}
+    files: dict[str, dict[str, int]] = {}
     for line in file:
-      match = re.search(r'(?P<filename>.*):\d+:\d+: warning: .*\[(?P<warning>-W[\w-]+)\]', line)
+      match = re.search(r'^(?P<filename>.*?):\d+:\d+: warning: .*\[(?P<warning>-W[\w-]+)\]$', line)
       if match:
         filename = match.group('filename')
+        filename = os.path.normpath(filename)
         if filename not in files:
           files[filename] = {}
         warning = match.group('warning')
@@ -35,6 +37,14 @@ def main():
   if arguments.json:
     print(json.dumps(files))
   else:
+    total_count = sum(sum(warnings.values()) for warnings in files.values())
+    total_files = len(files.keys())
+    warning_types = set()
+    for warnings in files.values():
+      for warning in warnings.keys():
+        warning_types.add(warning)
+    total_warnings = len(warning_types)
+
     output = {}
     if arguments.f:
       output = files
@@ -50,7 +60,9 @@ def main():
     for group in sorted(output.keys(), key=lambda g: sum(output[g].values()), reverse=True):
       print(f'{group}: {sum(output[group].values())}')
       for item in sorted(output[group].keys(), key=lambda i: output[group][i], reverse=True):
+        total_count += output[group][item]
         print(f'\t{item}: {output[group][item]}')
+    print(f'{total_count} warnings of {total_warnings} types across {total_files} files')
 
 
 if __name__ == '__main__':

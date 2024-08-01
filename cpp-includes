@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+
+
+import argparse
+import json
+import os
+
+
+# this list of extensions was taken from the gcc man page about controlling the kind of output
+SOURCE_EXTENSIONS = ('.c', '.cc', '.cp', '.cxx', '.cpp', '.CPP', '.CXX', '.C++', '.C')
+HEADER_EXTENSIONS = ('.h', '.hh', '.hp', '.hxx', '.hpp', '.HPP', '.tcc', '.h++', '.H')
+
+
+file_sizes = {}
+
+
+def process_file(path: str):
+  # no-op if we've already done this file
+  if path in file_sizes:
+    return
+
+  original_size = os.path.getsize(path)
+  file_sizes[path] = {'size': original_size, 'includes': [], 'system': []}
+
+  # read the file in
+  with open(path) as file:
+    content = file.read()
+
+  # quick n dirty parser
+  position = 0
+  while position < len(content):
+    # check for comments and remove
+    if content[position:position + 2] == '//':
+      while content[position] != '\n':
+        position += 1
+    if content[position:position + 2] == '/*':
+      while content[position:position + 2] != '*/':
+        position += 1
+
+    # if we have an include, pull out the file
+    if content[position:position + 8] == '#include':
+      position += 8
+
+      # remove any following whitespace
+      while content[position].isspace():
+        position += 1
+
+      # assume that all <> includes are system includes
+      local = content[position] == '"'
+      position += 1
+      start = position
+      while content[position] != '"' and content[position] != '>':
+        position += 1
+      include = os.path.normpath(os.path.join(os.path.dirname(path), content[start:position]))
+      if local:
+        process_file(include)
+        file_sizes[path]['includes'].append(include)
+      else:
+        file_sizes[path]['system'].append(include)
+    position += 1
+
+
+def process_directory(directory: str):
+  for root, directories, files in os.walk(directory):
+    for file in files:
+      if (file.endswith(SOURCE_EXTENSIONS) or file.endswith(HEADER_EXTENSIONS)):
+        process_file(os.path.join(root, file))
+
+
+def compute_size(file: str, encountered: list[str]):
+  direct_size = 0
+  indirect_size = 0
+  entry = file_sizes[file]
+  for include in entry['includes']:
+    if include in encountered:
+      continue
+    encountered.append(file)
+    direct_size += file_sizes[include]['size']
+    indirect_size += sum(compute_size(include, encountered))
+  return (direct_size, indirect_size)
+
+
+def get_total_size(file: str) -> int:
+  original_size = file_sizes[file]['size']
+  direct_size, indirect_size = compute_size(file, [file])
+  return original_size + direct_size + indirect_size
+
+
+def main():
+  program = argparse.ArgumentParser(description='Scans a C/++ codebase for large include files')
+
+  program.add_argument('directories', default=['.'], nargs='*')
+
+  sort = program.add_mutually_exclusive_group()
+  sort.add_argument('-a', '--alphanumeric', help='Sort the output by alphanumerical order on the file name', action='store_true')
+  sort.add_argument('-s', '--size', help='Sort the output in descending order by the total file size', action='store_true')
+
+  program.add_argument('-j', '--json', help='Output data in JSON format', action='store_true')
+  program.add_argument('-H', help='Human-readable sizes', action='store_true')
+
+  arguments = program.parse_args()
+
+  for directory in arguments.directories:
+    process_directory(directory)
+
+  files = file_sizes.keys()
+  if arguments.a:
+    files = sorted(files)
+  elif arguments.s:
+    files = sorted(files, key=lambda f: get_total_size(f), reverse=True)
+
+
+  if arguments.json:
+    data = {}
+    for file in files:
+      original_size = file_sizes[file]['size']
+      direct_size, indirect_size = compute_size(file, [file])
+      total_size = original_size + direct_size + indirect_size
+
+      data[file] = {
+        'size': file_sizes[file]['size'],
+        'direct': direct_size,
+        'indirect': indirect_size,
+        'total': total_size,
+        'includes': len(file_sizes[file]['includes']),
+        'system': len(file_sizes[file]['system'])
+      }
+    print(json.dumps(data))
+  else:
+    for file in files:
+      original_size = file_sizes[file]['size']
+      direct_size, indirect_size = compute_size(file, [file])
+      total_size = original_size + direct_size + indirect_size
+
+      print(f'{file}: went from {original_size} to {total_size} ({direct_size} directly, {indirect_size} indirectly)')
+
+
+if __name__ == '__main__':
+  main()

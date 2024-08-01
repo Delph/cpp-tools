@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+
+
+import argparse
+import json
+import re
+
+
+def main():
+  program = argparse.ArgumentParser(description='Processes a build log (gcc) for warnings')
+
+  program.add_argument('log')
+
+  group = program.add_mutually_exclusive_group()
+  group.add_argument('-f', help='Group results by filename', action='store_true')
+  group.add_argument('-w', help='Group results by warning type', action='store_true')
+
+  program.add_argument('-j', '--json', help='Output data in JSON format', action='store_true')
+
+  arguments = program.parse_args()
+
+  with open(arguments.log, 'r', errors='replace') as file:
+    files = {}
+    for line in file:
+      match = re.search(r'(?P<filename>.*):\d+:\d+: warning: .*\[(?P<warning>-W[\w-]+)\]', line)
+      if match:
+        filename = match.group('filename')
+        if filename not in files:
+          files[filename] = {}
+        warning = match.group('warning')
+        if not warning in files[filename]:
+          files[filename][warning] = 0
+        files[filename][warning] += 1
+
+  if arguments.json:
+    print(json.dumps(files))
+  else:
+    output = {}
+    if arguments.f:
+      output = files
+    elif arguments.w:
+      for file, warnings in files.items():
+        for warning, count in warnings.items():
+          if not warning in output:
+            output[warning] = {}
+          if not file in output[warning]:
+            output[warning][file] = 0
+          output[warning][file] += count
+
+    for group in sorted(output.keys(), key=lambda g: sum(output[g].values()), reverse=True):
+      print(f'{group}: {sum(output[group].values())}')
+      for item in sorted(output[group].keys(), key=lambda i: output[group][i], reverse=True):
+        print(f'\t{item}: {output[group][item]}')
+
+
+if __name__ == '__main__':
+  main()
